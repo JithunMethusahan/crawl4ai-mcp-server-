@@ -1,63 +1,41 @@
-# Multi-stage Dockerfile for Crawl4AI MCP Server
-# Optimized for size and caching
+FROM python:3.11-slim
 
-# Stage 1: Python dependencies
-FROM python:3.11-slim AS dependencies
-
-# Set environment variables for Python
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
-
-# Create app directory
 WORKDIR /app
 
-# Copy requirements first for better layer caching
-COPY requirements.txt .
+# Install system dependencies needed for Chrome/Playwright, plus Node.js for the SSE proxy
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    libnss3 \
+    libatk-bridge2.0-0 \
+    libxss1 \
+    libasound2 \
+    libgbm1 \
+    libgtk-3-0 \
+    libxshmfence-dev \
+    libxrandr2 \
+    libxcomposite1 \
+    libxcursor1 \
+    libxdamage1 \
+    libxi6 \
+    && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-RUN pip install -r requirements.txt
+# Install the official MCP SSE proxy server globally
+RUN npm install -g @modelcontextprotocol/server-express
 
-# Stage 2: Install Playwright browsers + system deps
-FROM dependencies AS browsers
-
-# Set a shared browser path so browsers are accessible to any user
-ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
-
-# Install Playwright chromium and all required system dependencies
-RUN python -m playwright install --with-deps chromium
-
-# Stage 3: Final runtime image
-FROM browsers AS runtime
-
-# Copy application code
+# Copy project files
 COPY . .
 
-# Create directories for outputs
-RUN mkdir -p /app/crawls /app/test_crawls
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Create non-root user for security
-RUN adduser --disabled-password --gecos '' --uid 1000 appuser \
-    && chown -R appuser:appuser /app
-USER appuser
+# Install playwright headless browsers for scraping
+RUN python -m playwright install chromium
 
-# Set environment variables
-ENV PYTHONPATH=/app \
-    CRAWL4AI_MCP_LOG=INFO \
-    PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
+# Render uses port 10000 by default
+EXPOSE 10000
 
-# Expose volume mount points
-VOLUME ["/app/crawls", "/app/test_crawls"]
-
-# Default command runs the MCP server
-CMD ["python", "-m", "crawler_agent.mcp_server"]
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import crawler_agent.mcp_server; print('OK')" || exit 1
-
-# Labels for metadata
-LABEL maintainer="crawler_agent" \
-      description="Crawl4AI MCP Server - Web scraping and crawling tools for AI agents" \
-      version="1.0.0"
+# The magic line: Launches the express proxy, which runs the python script internally and serves it over SSE HTTP
+CMD ["mcp-server-express", "python", "-m", "crawler_agent.mcp_server"]
