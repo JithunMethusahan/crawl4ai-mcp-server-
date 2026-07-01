@@ -34,8 +34,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Install playwright headless browsers for scraping
 RUN python -m playwright install chromium
 
-# Render uses port 10000 by default
-EXPOSE 10000
+# Hugging Face Spaces strictly requires port 7860
+EXPOSE 7860
 
-# The magic line: Launches the express proxy, which runs the python script internally and serves it over SSE HTTP
-CMD ["mcp-server-express", "python", "-m", "crawler_agent.mcp_server"]
+# Launches the express proxy on port 7860, running the python script internally
+CMD ["mcp-server-express", "python", "-m", "crawler_agent.mcp_server", "--port", "7860"]
